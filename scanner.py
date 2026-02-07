@@ -58,7 +58,7 @@ class Scanner:
             "-i", "10",
             "-x", "30",
             "-m", str(MAX_RESULTS),
-            "-v", "2"
+            "-v", "5"
         ]
         subprocess.run(cmd)
 
@@ -69,6 +69,11 @@ class Scanner:
             subprocess.run(["git", "checkout", RESULTS_BRANCH],
                            stdout=subprocess.DEVNULL,
                            stderr=subprocess.DEVNULL)
+
+            subprocess.run(
+                ["git", "pull", "--rebase", "origin", RESULTS_BRANCH],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
 
             subprocess.run(["git", "add", RESULT_FILE])
             subprocess.run(
