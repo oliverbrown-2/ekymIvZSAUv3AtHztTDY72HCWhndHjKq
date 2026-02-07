@@ -33,8 +33,7 @@ jobs:
     
     - name: Clone and setup Pagodo
       run: |
-        wget https://github.com/Cl0udG0d/Fofa-hack/releases/download/v2.5.2/fofa-hack_linux_amd64
-        chmod +x fofa-hack_linux_amd64
+        pip3 install -r requirements.txt
     
     - name: Configure Git
       run: |
@@ -50,13 +49,13 @@ jobs:
     
     - name: Run infinite scanner
       run: |
-        ./fofa-hack_linux_amd64 -k 'X-Powered-By: Next.js' -e 1000
+        python3 scanner.py
       continue-on-error: true
     
     - name: Final commit (if scanner stopped)
       run: |
         git checkout scan-results || git checkout -b scan-results
-        git add fofaHack.txt || true
+        git add nextjs_sites.txt || true
         git diff --quiet && git diff --staged --quiet || git commit -m "Final save: $(date)" || true
         git push origin scan-results || true
       continue-on-error: true
