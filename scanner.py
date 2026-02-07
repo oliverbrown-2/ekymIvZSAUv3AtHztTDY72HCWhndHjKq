@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 import asyncio
 import aiohttp
-import subprocess
 from datetime import datetime
+import subprocess
 
 URL_LIST = "https://crawler.ninja/files/https-sites.txt"
 OUTPUT_FILE = "nextjs_sites.txt"
-CONCURRENCY = 500
+CONCURRENCY = 200
 TIMEOUT = 5
-SAVE_INTERVAL = 60  # seconds
-GIT_BRANCH = "scan-results"
 DEBUG = True  # True for debug output, False for quiet mode
 
 HEADERS = {
@@ -24,7 +22,6 @@ HEADERS = {
     "Upgrade-Insecure-Requests": "1",
 }
 
-
 async def fetch_sites():
     """Download site list and parse valid domains"""
     timeout = aiohttp.ClientTimeout(total=10)
@@ -33,7 +30,6 @@ async def fetch_sites():
             text = await resp.text()
             lines = text.splitlines()
             return parse_sites(lines)
-
 
 def parse_sites(lines):
     """Extract domain from lines formatted as 'number domain'"""
@@ -47,100 +43,48 @@ def parse_sites(lines):
             sites.append("https://" + domain)
     return sites
 
-
-def is_next_header(headers):
-    """Check X-Powered-By and Server headers for Next.js"""
-    powered = headers.get("X-Powered-By", "")
-    server = headers.get("Server", "")
-    if DEBUG:
-        print(f"DEBUG Headers: X-Powered-By={powered} | Server={server}")
-    return "next.js" in powered.lower() or "vercel" in server.lower()
-
-
 async def check_site(session, sem, url):
-    """Check a single site for Next.js"""
+    """Check a single site for Next.js via /_next/static/"""
     async with sem:
+        next_url = url.rstrip("/") + "/_next/static/"
         try:
-            timeout = aiohttp.ClientTimeout(total=TIMEOUT)
-
-            # HEAD request
-            try:
-                async with session.head(url, timeout=timeout, allow_redirects=True) as resp:
-                    if DEBUG:
-                        print(f"[HEAD] {url} -> {resp.status}")
-                    if is_next_header(resp.headers):
-                        print(f"[+] {url} -> Next.js found via HEAD header")
-                        return url
-            except Exception as e:
+            async with session.get(next_url, timeout=TIMEOUT, allow_redirects=True) as resp:
                 if DEBUG:
-                    print(f"[HEAD ERROR] {url} -> {e}")
-
-            # Fallback GET /
-            try:
-                async with session.get(url, timeout=timeout) as resp:
-                    if DEBUG:
-                        print(f"[GET /] {url} -> {resp.status}")
-                    if is_next_header(resp.headers):
-                        print(f"[+] {url} -> Next.js found via GET / header")
-                        return url
-            except Exception as e:
-                if DEBUG:
-                    print(f"[GET ERROR] {url} -> {e}")
-
-            # Check /_next/static/
-            next_url = url.rstrip("/") + "/_next/static/"
-            try:
-                async with session.get(next_url, timeout=timeout, allow_redirects=True) as resp:
-                    if DEBUG:
-                        print(f"[GET _next/static/] {next_url} -> {resp.status}")
-                    if resp.status in (200, 301, 302):
-                        print(f"[+] {url} -> Next.js suspected via /_next/static/")
-                        return url
-            except Exception as e:
-                if DEBUG:
-                    print(f"[NEXT STATIC ERROR] {next_url} -> {e}")
-
+                    print(f"[GET] {next_url} -> {resp.status}")
+                if resp.status in (200, 301, 302, 403):
+                    with open(OUTPUT_FILE, "a") as f:
+                        f.write(f"{url}\n")
+                    print(f"[+] {url} -> Next.js suspected")
+                    return url
         except Exception as e:
             if DEBUG:
-                print(f"[ERROR] {url} -> {e}")
-
+                print(f"[ERROR] {next_url} -> {e}")
         return None
 
+def save_and_push_final_file(file_path):
+    """Create a git branch with date (YYYYMMDD), commit and push the final file"""
+    branch_name = f"scan{datetime.now().strftime('%Y%m%d')}"
+    try:
+        # Create branch and switch
+        subprocess.run(["git", "checkout", "-b", branch_name], check=True)
 
-async def save_and_commit(sites):
-    """Save found sites and push to git asynchronously"""
-    if not sites:
-        return
+        # Add file
+        subprocess.run(["git", "add", file_path], check=True)
 
-    # Save file
-    with open(OUTPUT_FILE, "w") as f:
-        for site in sites:
-            f.write(site + "\n")
-    print(f"[💾] Saved {len(sites)} sites to {OUTPUT_FILE}")
-
-    # Run git operations in a separate thread
-    def git_ops():
-        try:
-            subprocess.run(["git", "checkout", GIT_BRANCH], check=False)
-        except:
-            subprocess.run(["git", "checkout", "-b", GIT_BRANCH], check=True)
-
-        subprocess.run(["git", "add", OUTPUT_FILE], check=True)
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        commit_msg = f"Auto-save: {len(sites)} sites | {timestamp}"
+        # Commit
+        commit_msg = f"Next.js scan result | {datetime.now().strftime('%Y-%m-%d')}"
         subprocess.run(["git", "commit", "-m", commit_msg], check=False)
-        subprocess.run(["git", "push", "-u", "origin", GIT_BRANCH], check=False)
-        print(f"[✓] Git commit & push done: {commit_msg}")
 
-    await asyncio.to_thread(git_ops)
+        # Push branch
+        subprocess.run(["git", "push", "-u", "origin", branch_name], check=False)
 
+        print(f"[✓] Saved and pushed final file to branch {branch_name}")
 
-async def periodic_save(sites):
-    """Asynchronous task: save and push every SAVE_INTERVAL seconds"""
-    while True:
-        await asyncio.sleep(SAVE_INTERVAL)
-        await save_and_commit(sites)
+        # Optionally return to main branch
+        subprocess.run(["git", "checkout", "main"], check=False)
 
+    except subprocess.CalledProcessError as e:
+        print(f"[!] Git operation failed: {e}")
 
 async def main():
     sites_list = await fetch_sites()
@@ -150,23 +94,15 @@ async def main():
     connector = aiohttp.TCPConnector(limit=CONCURRENCY, ssl=False)
     timeout = aiohttp.ClientTimeout(total=TIMEOUT)
 
-    found = []
-
     async with aiohttp.ClientSession(headers=HEADERS, timeout=timeout, connector=connector) as session:
-        # Start periodic saving task
-        asyncio.create_task(periodic_save(found))
+        tasks = [check_site(session, sem, site) for site in sites_list]
+        results = await asyncio.gather(*tasks)
 
-        for site in sites_list:
-            result = await check_site(session, sem, site)
-            if result:
-                found.append(result)
-                print(f"[+] {result} (Total found: {len(found)})")
+    found_sites = [r for r in results if r]
+    print(f"\n[✓] Finished. Total Next.js sites found: {len(found_sites)}")
 
-        # Final save
-        await save_and_commit(found)
-
-    print(f"\n[✓] Finished. Total Next.js sites found: {len(found)}")
-
+    if found_sites:
+        save_and_push_final_file(OUTPUT_FILE)
 
 if __name__ == "__main__":
     asyncio.run(main())
