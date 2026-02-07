@@ -25,9 +25,7 @@ DORKS = [
 ]
 
 # SETTINGS
-MAX_RESULTS = 50
-TIMEOUT_PER_DORK = 180
-DELAY = 10
+MAX_RESULTS = 100
 RELOAD_PROXIES_AFTER_N_FAILS = 50
 SAVE_EVERY_N_REQUESTS = 10
 RESULTS_BRANCH = "scan-results"
@@ -169,10 +167,11 @@ class InfiniteScanner:
             sys.executable,  # Use same Python interpreter
             PAGODO_PATH,
             '-g', dork_file,
-            '-o', results_file,
+            '-s', results_file,
             '-p', proxy,
-            '-d', str(DELAY),
-            '-l', str(MAX_RESULTS),
+            '-i', 10,
+            '-x', 30,
+            '-m', MAX_RESULTS
         ]
         
         try:
@@ -181,7 +180,6 @@ class InfiniteScanner:
             result = subprocess.run(
                 cmd,
                 capture_output=True,
-                timeout=TIMEOUT_PER_DORK,
                 text=True
             )
             
