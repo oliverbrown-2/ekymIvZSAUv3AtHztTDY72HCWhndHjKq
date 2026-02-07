@@ -67,7 +67,7 @@ jobs:
     - name: Final commit (if scanner stopped)
       run: |
         git checkout scan-results || git checkout -b scan-results
-        git add infinite_domains.txt scan_stats.txt || true
+        git add infinite_domains.txt || true
         git diff --quiet && git diff --staged --quiet || git commit -m "Final save: $(date)" || true
         git push origin scan-results || true
       continue-on-error: true
