@@ -55,7 +55,6 @@ class Scanner:
             PAGODO_PATH,
             "-g", DORK_FILE,
             "-s", RESULT_FILE,
-            "-p", proxy_string,
             "-i", "10",
             "-x", "30",
             "-m", str(MAX_RESULTS),
