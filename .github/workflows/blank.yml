@@ -1,0 +1,62 @@
+name: Infinite Next.js Scanner
+
+on:
+  # Manual trigger
+  workflow_dispatch:
+  
+  # Scheduled runs (every 6 hours)
+  schedule:
+    - cron: '0 */6 * * *'  # Every 6 hours
+  
+  # Can also trigger on push
+  # push:
+  #   branches: [ main ]
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360  # 6 hours max runtime
+    
+    permissions:
+      contents: write  # Need write permission for commits
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Fetch all history for all branches
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Configure Git
+      run: |
+        git config --global user.name 'Github Bot'
+        git config --global user.email 'bot@github.com'
+    
+    - name: Create results branch if not exists
+      run: |
+        git fetch origin
+        git checkout scan-results 2>/dev/null || git checkout -b scan-results
+        git push -u origin scan-results || true
+        git checkout main
+    
+    - name: Run infinite scanner
+      run: |
+        python scanner.py
+      continue-on-error: true  # Continue even if scanner times out
+    
+    - name: Final commit (if scanner stopped)
+      run: |
+        git checkout scan-results
+        git add infinite_domains.txt scan_stats.txt || true
+        git commit -m "Final save: $(date)" || true
+        git push origin scan-results || true
