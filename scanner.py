@@ -6,7 +6,7 @@ from datetime import datetime
 
 URL_LIST = "https://crawler.ninja/files/https-sites.txt"
 OUTPUT_FILE = "nextjs_sites.txt"
-CONCURRENCY = 500
+CONCURRENCY = 200
 TIMEOUT = 5
 SAVE_INTERVAL = 60  # seconds
 GIT_BRANCH = "scan-results"
@@ -126,4 +126,41 @@ def save_and_commit(sites):
     commit_msg = f"Auto-save: {len(sites)} sites | {timestamp}"
     subprocess.run(["git", "commit", "-m", commit_msg], check=False)
     subprocess.run(["git", "push", "-u", "origin", GIT_BRANCH], check=False)
-    print(f"[✓] Git commit
+    print(f"[✓] Git commit & push done: {commit_msg}")
+
+
+async def periodic_save(sites):
+    """Asynchronous task: save and push every SAVE_INTERVAL seconds"""
+    while True:
+        await asyncio.sleep(SAVE_INTERVAL)
+        save_and_commit(sites)
+
+
+async def main():
+    sites_list = await fetch_sites()
+    print(f"Loaded {len(sites_list)} sites")
+
+    sem = asyncio.Semaphore(CONCURRENCY)
+    connector = aiohttp.TCPConnector(limit=CONCURRENCY, ssl=False)
+    timeout = aiohttp.ClientTimeout(total=TIMEOUT)
+
+    found = []
+
+    async with aiohttp.ClientSession(headers=HEADERS, timeout=timeout, connector=connector) as session:
+        # Start periodic saving task
+        asyncio.create_task(periodic_save(found))
+
+        for site in sites_list:
+            result = await check_site(session, sem, site)
+            if result:
+                found.append(result)
+                print(f"[+] {result} (Total found: {len(found)})")
+
+        # Final save
+        save_and_commit(found)
+
+    print(f"\n[✓] Finished. Total Next.js sites found: {len(found)}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
