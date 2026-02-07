@@ -6,7 +6,7 @@ from datetime import datetime
 
 URL_LIST = "https://crawler.ninja/files/https-sites.txt"
 OUTPUT_FILE = "nextjs_sites.txt"
-CONCURRENCY = 200
+CONCURRENCY = 500
 TIMEOUT = 5
 SAVE_INTERVAL = 60  # seconds
 GIT_BRANCH = "scan-results"
@@ -107,33 +107,39 @@ async def check_site(session, sem, url):
         return None
 
 
-def save_and_commit(sites):
-    """Save found sites and push to git"""
+async def save_and_commit(sites):
+    """Save found sites and push to git asynchronously"""
     if not sites:
         return
+
+    # Save file
     with open(OUTPUT_FILE, "w") as f:
         for site in sites:
             f.write(site + "\n")
     print(f"[💾] Saved {len(sites)} sites to {OUTPUT_FILE}")
 
-    try:
-        subprocess.run(["git", "checkout", GIT_BRANCH], check=False)
-    except:
-        subprocess.run(["git", "checkout", "-b", GIT_BRANCH], check=True)
+    # Run git operations in a separate thread
+    def git_ops():
+        try:
+            subprocess.run(["git", "checkout", GIT_BRANCH], check=False)
+        except:
+            subprocess.run(["git", "checkout", "-b", GIT_BRANCH], check=True)
 
-    subprocess.run(["git", "add", OUTPUT_FILE], check=True)
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    commit_msg = f"Auto-save: {len(sites)} sites | {timestamp}"
-    subprocess.run(["git", "commit", "-m", commit_msg], check=False)
-    subprocess.run(["git", "push", "-u", "origin", GIT_BRANCH], check=False)
-    print(f"[✓] Git commit & push done: {commit_msg}")
+        subprocess.run(["git", "add", OUTPUT_FILE], check=True)
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        commit_msg = f"Auto-save: {len(sites)} sites | {timestamp}"
+        subprocess.run(["git", "commit", "-m", commit_msg], check=False)
+        subprocess.run(["git", "push", "-u", "origin", GIT_BRANCH], check=False)
+        print(f"[✓] Git commit & push done: {commit_msg}")
+
+    await asyncio.to_thread(git_ops)
 
 
 async def periodic_save(sites):
     """Asynchronous task: save and push every SAVE_INTERVAL seconds"""
     while True:
         await asyncio.sleep(SAVE_INTERVAL)
-        save_and_commit(sites)
+        await save_and_commit(sites)
 
 
 async def main():
@@ -157,7 +163,7 @@ async def main():
                 print(f"[+] {result} (Total found: {len(found)})")
 
         # Final save
-        save_and_commit(found)
+        await save_and_commit(found)
 
     print(f"\n[✓] Finished. Total Next.js sites found: {len(found)}")
 
