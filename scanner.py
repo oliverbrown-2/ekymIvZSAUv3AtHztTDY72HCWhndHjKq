@@ -1,114 +1,130 @@
-#!/usr/bin/env python3
+import asyncio
+import aiohttp
 import subprocess
-import threading
-import time
-import os
-import sys
-import urllib.request
+from datetime import datetime
 
-PROXY_URL = "https://raw.githubusercontent.com/Skillter/ProxyGather/refs/heads/master/proxies/working-proxies-all.txt"
+URL_LIST = "https://crawler.ninja/files/https-sites.txt"
+OUTPUT_FILE = "nextjs_sites.txt"
+CONCURRENCY = 500
+TIMEOUT = 5
+SAVE_INTERVAL = 60  # секунд
+GIT_BRANCH = "scan-results"
 
-DORKS = [
-    'inurl:_next',
-    'inurl:_next/static',
-    'inurl:_next/data',
-    'intext:"__NEXT_DATA__"',
-    'intitle:"Next.js"',
-]
-
-MAX_RESULTS = 100
-COMMIT_INTERVAL = 60  # seconds
-RESULTS_BRANCH = "scan-results"
-
-PAGODO_PATH = os.path.join(os.path.dirname(__file__), 'pagodo', 'pagodo.py')
-DORK_FILE = "dorks.txt"
-RESULT_FILE = "results.txt"
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/122.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+}
 
 
-class Scanner:
+async def fetch_sites():
+    timeout = aiohttp.ClientTimeout(total=10)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.get(URL_LIST) as resp:
+            text = await resp.text()
+            return [line.strip() for line in text.splitlines() if line.strip()]
 
-    def download_proxies(self):
-        print("[*] Downloading proxies...")
-        with urllib.request.urlopen(PROXY_URL, timeout=30) as r:
-            lines = r.read().decode().splitlines()
 
-        proxies = []
-        for p in lines:
-            p = p.strip()
-            if not p:
-                continue
-            if not p.startswith("http"):
-                p = "http://" + p
-            proxies.append(p)
+def is_next_header(headers):
+    powered = headers.get("X-Powered-By", "")
+    server = headers.get("Server", "")
+    return "next.js" in powered.lower() or "vercel" in server.lower()
 
-        proxy_string = ",".join(proxies)
-        print(f"[+] Loaded {len(proxies)} proxies")
-        return proxy_string
 
-    def write_dorks(self):
-        with open(DORK_FILE, "w") as f:
-            f.write("\n".join(DORKS))
-
-    def run_pagodo(self, proxy_string):
-        cmd = [
-            sys.executable,
-            PAGODO_PATH,
-            "-g", DORK_FILE,
-            "-s", RESULT_FILE,
-            "-i", "10",
-            "-x", "30",
-            "-m", str(MAX_RESULTS),
-            "-v", "5"
-        ]
-        subprocess.run(cmd)
-
-    def git_commit_loop(self):
-        while True:
-            time.sleep(COMMIT_INTERVAL)
-
-            subprocess.run(["git", "checkout", RESULTS_BRANCH],
-                           stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL)
-
-            subprocess.run(
-                ["git", "pull", "--rebase", "origin", RESULTS_BRANCH],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-
-            subprocess.run(["git", "add", RESULT_FILE])
-            subprocess.run(
-                ["git", "commit", "-m", "Auto update results"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            subprocess.run(["git", "push"],
-                           stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL)
-
-            print("[✓] Auto-committed results.txt")
-
-    def run(self):
-        if not os.path.exists(PAGODO_PATH):
-            print("Pagodo not found.")
-            return
-
-        self.write_dorks()
-        proxy_string = self.download_proxies()
-
-        t = threading.Thread(target=self.git_commit_loop, daemon=True)
-        t.start()
-
+async def check_site(session, sem, url):
+    async with sem:
         try:
-            while True:
-                self.run_pagodo(proxy_string)
-                time.sleep(5)
+            timeout = aiohttp.ClientTimeout(total=TIMEOUT)
 
-        except KeyboardInterrupt:
-            print("\n[!] Stopping...")
-            subprocess.run(["git", "add", RESULT_FILE])
-            subprocess.run(["git", "commit", "-m", "Final update"])
-            subprocess.run(["git", "push"])
+            # HEAD
+            try:
+                async with session.head(url, timeout=timeout, allow_redirects=True) as resp:
+                    if is_next_header(resp.headers):
+                        return url
+            except:
+                pass
+
+            # Fallback GET /
+            try:
+                async with session.get(url, timeout=timeout) as resp:
+                    if is_next_header(resp.headers):
+                        return url
+            except:
+                pass
+
+            # Check /_next/static/
+            next_url = url.rstrip("/") + "/_next/static/"
+            try:
+                async with session.get(next_url, timeout=timeout, allow_redirects=True) as resp:
+                    if resp.status in (200, 301, 302):
+                        return url
+            except:
+                pass
+
+        except Exception:
+            pass
+
+        return None
+
+
+def save_and_commit(sites):
+    if not sites:
+        return
+    # Save to file
+    with open(OUTPUT_FILE, "w") as f:
+        for site in sites:
+            f.write(site + "\n")
+    print(f"[💾] Saved {len(sites)} sites to {OUTPUT_FILE}")
+
+    # Git commit and push
+    try:
+        subprocess.run(["git", "checkout", GIT_BRANCH], check=False)
+    except:
+        subprocess.run(["git", "checkout", "-b", GIT_BRANCH], check=True)
+
+    subprocess.run(["git", "add", OUTPUT_FILE], check=True)
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    commit_msg = f"Auto-save: {len(sites)} sites | {timestamp}"
+    subprocess.run(["git", "commit", "-m", commit_msg], check=False)
+    subprocess.run(["git", "push", "-u", "origin", GIT_BRANCH], check=False)
+    print(f"[✓] Git commit & push done: {commit_msg}")
+
+
+async def periodic_save(sites):
+    while True:
+        await asyncio.sleep(SAVE_INTERVAL)
+        save_and_commit(sites)
+
+
+async def main():
+    sites_list = await fetch_sites()
+    print(f"Loaded {len(sites_list)} sites")
+
+    sem = asyncio.Semaphore(CONCURRENCY)
+    connector = aiohttp.TCPConnector(limit=CONCURRENCY, ssl=False)
+    timeout = aiohttp.ClientTimeout(total=TIMEOUT)
+
+    found = []
+
+    async with aiohttp.ClientSession(headers=HEADERS, timeout=timeout, connector=connector) as session:
+        asyncio.create_task(periodic_save(found))
+
+        for site in sites_list:
+            result = await check_site(session, sem, site)
+            if result:
+                found.append(result)
+                print(f"[+] {result} (Total found: {len(found)})")
+
+        save_and_commit(found)
+
+    print(f"\n[✓] Finished. Total Next.js sites found: {len(found)}")
 
 
 if __name__ == "__main__":
-    Scanner().run()
+    asyncio.run(main())
