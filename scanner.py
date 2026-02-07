@@ -37,8 +37,8 @@ class Scanner:
             p = p.strip()
             if not p:
                 continue
-            if not p.startswith("https"):
-                p = "https://" + p
+            if not p.startswith("http"):
+                p = "http://" + p
             proxies.append(p)
 
         proxy_string = ",".join(proxies)
