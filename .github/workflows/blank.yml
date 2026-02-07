@@ -9,7 +9,6 @@ on:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 360  # 6 hours max runtime
     
     permissions:
       contents: write
@@ -54,8 +53,9 @@ jobs:
     
     - name: Final commit (if scanner stopped)
       run: |
-        git checkout scan-results || git checkout -b scan-results
+        BRANCH="scan$(date +%Y%m%d)"
+        git checkout "$BRANCH" || git checkout -b "$BRANCH"
         git add nextjs_sites.txt || true
-        git diff --quiet && git diff --staged --quiet || git commit -m "Final save: $(date)" || true
-        git push origin scan-results || true
+        git diff --quiet && git diff --staged --quiet || git commit -m "Final save: $(date +%Y-%m-%d)" || true
+        git push -u origin "$BRANCH" || true
       continue-on-error: true
