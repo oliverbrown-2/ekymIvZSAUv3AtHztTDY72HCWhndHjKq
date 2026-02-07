@@ -17,7 +17,7 @@ DORKS = [
 ]
 
 MAX_RESULTS = 100
-COMMIT_INTERVAL = 300  # seconds
+COMMIT_INTERVAL = 60  # seconds
 RESULTS_BRANCH = "scan-results"
 
 PAGODO_PATH = os.path.join(os.path.dirname(__file__), 'pagodo', 'pagodo.py')
