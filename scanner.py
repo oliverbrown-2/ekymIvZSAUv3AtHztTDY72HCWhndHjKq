@@ -6,7 +6,7 @@ from datetime import datetime
 
 URL_LIST = "https://crawler.ninja/files/https-sites.txt"
 OUTPUT_FILE = "nextjs_sites.txt"
-CONCURRENCY = 200
+CONCURRENCY = 1000
 TIMEOUT = 5
 DEBUG = True  # True for debug output
 
