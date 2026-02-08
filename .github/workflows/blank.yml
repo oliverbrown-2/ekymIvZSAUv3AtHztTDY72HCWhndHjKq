@@ -14,9 +14,6 @@ jobs:
       matrix:
         shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19]   # 20 parallel shards
 
-    permissions:
-      contents: write
-
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -71,15 +68,14 @@ jobs:
 
     - name: Merge shards
       run: |
-        mkdir -p merged
-        cat shards/nextjs_sites_*.txt | sort -u > merged/nextjs_sites.txt
+        cat shards/nextjs_sites_*.txt | sort -u > nextjs_sites.txt
         echo "Merged $(wc -l < merged/nextjs_sites.txt) unique sites"
 
         # Create branch with date
-        BRANCH="scan$(date +%Y%m%d)"
+        BRANCH="scan-$(date +%Y%m%d)"
         git checkout -b "$BRANCH"
 
         # Add merged file and commit
-        git add merged/nextjs_sites.txt
+        git add nextjs_sites.txt
         git commit -m "Final save: $(date +%Y%m%d)"
         git push -u origin "$BRANCH"
