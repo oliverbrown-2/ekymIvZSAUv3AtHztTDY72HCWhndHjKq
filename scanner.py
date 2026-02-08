@@ -14,7 +14,7 @@ URL_LIST = "https://crawler.ninja/files/https-sites.txt"
 OUTPUT_FILE = "nextjs_sites.txt"
 CONCURRENCY = 100
 TIMEOUT = 5
-DEBUG = True  # True for debug output
+DEBUG = False  # True for debug output
 
 HEADERS = {
     "User-Agent": (
