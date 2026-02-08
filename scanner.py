@@ -2,7 +2,13 @@
 import asyncio
 import aiohttp
 import subprocess
+import argparse
 from datetime import datetime
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--shard", type=int, default=0)
+parser.add_argument("--total-shards", type=int, default=1)
+args = parser.parse_args()
 
 URL_LIST = "https://crawler.ninja/files/https-sites.txt"
 OUTPUT_FILE = "nextjs_sites.txt"
@@ -99,35 +105,13 @@ async def check_site(session, sem, url):
 
         return None
 
-def save_and_push_final_file(sites):
-    """Save found sites and push to a git branch named with today's date"""
-    if not sites:
-        return
-
-    # Save to file
-    with open(OUTPUT_FILE, "w") as f:
-        for site in sites:
-            f.write(site + "\n")
-    print(f"[💾] Saved {len(sites)} sites to {OUTPUT_FILE}")
-
-    # Branch name like scanYYYYMMDD
-    branch_name = f"scan{datetime.now().strftime('%Y%m%d')}"
-    try:
-        subprocess.run(["git", "checkout", "-b", branch_name], check=True)
-    except subprocess.CalledProcessError:
-        # If branch exists, just checkout
-        subprocess.run(["git", "checkout", branch_name], check=True)
-
-    subprocess.run(["git", "add", OUTPUT_FILE], check=True)
-    commit_msg = f"Next.js scan result | {datetime.now().strftime('%Y-%m-%d')}"
-    subprocess.run(["git", "commit", "-m", commit_msg], check=False)
-    subprocess.run(["git", "push", "-u", "origin", branch_name], check=False)
-    print(f"[✓] Git commit & push done on branch {branch_name}")
-    subprocess.run(["git", "checkout", "main"], check=False)
-
 async def main():
     sites_list = await fetch_sites()
     print(f"Loaded {len(sites_list)} sites")
+
+    # Sharding
+    sites_list = sites_list[args.shard::args.total_shards]
+    print(f"Shard {args.shard}/{args.total_shards} processing {len(sites_list)} sites")
 
     sem = asyncio.Semaphore(CONCURRENCY)
     connector = aiohttp.TCPConnector(limit=CONCURRENCY, ssl=False)
@@ -135,17 +119,38 @@ async def main():
 
     found = []
 
-    async with aiohttp.ClientSession(headers=HEADERS, timeout=timeout, connector=connector) as session:
-        tasks = [check_site(session, sem, site) for site in sites_list]
-        results = await asyncio.gather(*tasks)
+    async with aiohttp.ClientSession(
+        headers=HEADERS,
+        timeout=timeout,
+        connector=connector
+    ) as session:
 
-        for r in results:
-            if r:
-                found.append(r)
+        tasks = []
+        for site in sites_list:
+            task = asyncio.create_task(check_site(session, sem, site))
+            tasks.append(task)
 
-    save_and_push_final_file(found)
+            # Limit number of scheduled tasks in memory
+            if len(tasks) >= CONCURRENCY * 5:
+                for completed in asyncio.as_completed(tasks):
+                    result = await completed
+                    if result:
+                        found.append(result)
+                tasks = []
 
-    print(f"\n[✓] Finished. Total Next.js sites found: {len(found)}")
+        # Finish remaining tasks
+        for completed in asyncio.as_completed(tasks):
+            result = await completed
+            if result:
+                found.append(result)
+
+    # Unique output per shard (recommended)
+    output_file = f"nextjs_sites_{args.shard}.txt"
+    with open(output_file, "w") as f:
+        for site in found:
+            f.write(site + "\n")
+
+    print(f"[✓] Finished shard {args.shard}. Found: {len(found)}")
 
 if __name__ == "__main__":
     asyncio.run(main())
