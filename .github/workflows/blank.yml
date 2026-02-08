@@ -1,61 +1,83 @@
-name: Infinite Next.js Scanner
+name: Next.js Scanner
 
 on:
-  workflow_dispatch:  # Manual trigger
-  
+  workflow_dispatch:
   schedule:
     - cron: '0 3 * * *'
 
 jobs:
   scan:
     runs-on: ubuntu-latest
-    
+
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0,1,2,3,4,5,6,7,8,9]   # 10 parallel shards
+
     permissions:
       contents: write
-    
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        pip3 install -r requirements.txt
+
+    - name: Run scanner shard
+      run: |
+        python3 scanner.py \
+          --shard ${{ matrix.shard }} \
+          --total-shards 10
+
+    - name: Upload shard result
+      uses: actions/upload-artifact@v4
+      with:
+        name: shard-${{ matrix.shard }}
+        path: nextjs_sites.txt
+        if-no-files-found: ignore
+
+
+  merge:
+    needs: scan
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
         token: ${{ secrets.GITHUB_TOKEN }}
-    
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-    
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y git
-    
-    - name: Clone and setup Pagodo
-      run: |
-        pip3 install -r requirements.txt
-    
+
     - name: Configure Git
       run: |
         git config --global user.name 'Scanner Bot'
         git config --global user.email 'scanner@bot.com'
-    
-    - name: Create results branch if not exists
+
+    - name: Download all shard artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: shards
+
+    - name: Merge results
       run: |
-        git fetch origin
-        git checkout scan-results 2>/dev/null || git checkout -b scan-results
-        git push -u origin scan-results || true
-        git checkout main
-    
-    - name: Run infinite scanner
-      run: |
-        python3 scanner.py
-      continue-on-error: true
-    
-    - name: Final commit (if scanner stopped)
+        find shards -name "nextjs_sites.txt" -exec cat {} + | sort -u > nextjs_sites.txt
+
+    - name: Commit final result
       run: |
         BRANCH="scan$(date +%Y%m%d)"
         git checkout "$BRANCH" || git checkout -b "$BRANCH"
-        git add nextjs_sites.txt || true
-        git diff --quiet && git diff --staged --quiet || git commit -m "Final save: $(date +%Y-%m-%d)" || true
-        git push -u origin "$BRANCH" || true
-      continue-on-error: true
+        git add nextjs_sites.txt
+        git commit -m "Scan result $(date +%Y-%m-%d)" || true
+        git push -u origin "$BRANCH"
