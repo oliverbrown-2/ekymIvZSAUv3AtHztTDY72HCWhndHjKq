@@ -86,19 +86,6 @@ async def check_site(session, sem, url):
                 if DEBUG:
                     print(f"[GET ERROR] {url} -> {e}")
 
-            # GET /_next/static/
-            next_url = url.rstrip("/") + "/_next/static/"
-            try:
-                async with session.get(next_url, timeout=timeout, allow_redirects=True) as resp:
-                    if DEBUG:
-                        print(f"[GET _next/static/] {next_url} -> {resp.status}")
-                    if resp.status in (200, 301, 302):
-                        print(f"[+] {url} -> Next.js suspected via /_next/static/")
-                        return url
-            except Exception as e:
-                if DEBUG:
-                    print(f"[NEXT STATIC ERROR] {next_url} -> {e}")
-
         except Exception as e:
             if DEBUG:
                 print(f"[ERROR] {url} -> {e}")
