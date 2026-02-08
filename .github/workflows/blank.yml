@@ -41,9 +41,8 @@ jobs:
     - name: Upload shard result
       uses: actions/upload-artifact@v4
       with:
-        name: shard-${{ matrix.shard }}
-        path: nextjs_sites.txt
-        if-no-files-found: ignore
+        name: nextjs_sites_shard_${{ matrix.shard }}
+        path: nextjs_sites_${{ matrix.shard }}.txt
 
 
   merge:
@@ -70,14 +69,17 @@ jobs:
       with:
         path: shards
 
-    - name: Merge results
+    - name: Merge shards
       run: |
-        find shards -name "nextjs_sites.txt" -exec cat {} + | sort -u > nextjs_sites.txt
+        mkdir -p merged
+        cat shards/nextjs_sites_*.txt | sort -u > merged/nextjs_sites.txt
+        echo "Merged $(wc -l < merged/nextjs_sites.txt) unique sites"
 
-    - name: Commit final result
-      run: |
+        # Create branch with date
         BRANCH="scan$(date +%Y%m%d)"
-        git checkout "$BRANCH" || git checkout -b "$BRANCH"
-        git add nextjs_sites.txt
-        git commit -m "Scan result $(date +%Y-%m-%d)" || true
+        git checkout -b "$BRANCH"
+
+        # Add merged file and commit
+        git add merged/nextjs_sites.txt
+        git commit -m "Final save: $(date +%Y%m%d)"
         git push -u origin "$BRANCH"
