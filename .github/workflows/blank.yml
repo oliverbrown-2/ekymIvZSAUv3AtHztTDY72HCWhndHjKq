@@ -70,7 +70,7 @@ jobs:
     - name: Merge shards
       run: |
         cat shards/nextjs_sites_*.txt | sort -u > nextjs_sites.txt
-        echo "Merged $(wc -l < merged/nextjs_sites.txt) unique sites"
+        echo "Merged $(wc -l < nextjs_sites.txt) unique sites"
 
         # Create branch with date
         BRANCH="scan-$(date +%Y%m%d)"
